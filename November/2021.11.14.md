@@ -1,0 +1,246 @@
+# 학습 날짜
+2021.11.14.
+
+# 학습계획
+1. Memory Safety 공식문서
+2. 프로젝트
+
+
+# Memory Safety
+## Understanding Conflicting Access to Memory
+
+### Characteristics of Memory Access
+
+메모리 엑세스 시 충돌이 일어나는 대표적인 상황
+
+1. 두 개의 메모리 엑세스 중 적어도 하나가 write하거나 nonatomic접근 하는 경우
+2. 메모리의 같은 주소에 접근하는 경우
+3. 그들의 duration이 겹치는 경우 
+
+- Write엑세스는 메모리주소를 변경시키지만 Read는 아니다.
+
+> The duration of a memory access is either instantaneous or long-term.
+> 
+
+메모리엑세스
+
+1. 즉각적인 접근
+    - By their nature, two instantaneous accesses can’t happen at the same time
+    - 메모리에 접근하는 코드 끝나야 접근 가능
+
+1. long-term접근
+    - it’s possible for other code to run after a long-term access starts but before it ends, which is called *overlap*.
+    - 롱텀은 overlap가능하다.
+    - A long-term access can overlap with other long-term accesses and instantaneous accesses.
+
+## Conflicting Access to In-Out Parameters
+
+1. 충돌이 일어나는 코드
+    1. 이유 : 같은 메모리 주소에 접근하고 있음 
+        
+        ```swift
+        var stepSize = 1
+        
+        func increment(_ number: inout Int) {
+            number += stepSize
+        }
+        
+        increment(&stepSize)
+        // Error: conflicting accesses to stepSize
+        ```
+        
+        ![[https://docs.swift.org/swift-book/LanguageGuide/MemorySafety.html](https://docs.swift.org/swift-book/LanguageGuide/MemorySafety.html)](Memory%20Safety%20906c854b389c4343875859d36d5915f1/Untitled.png)
+        
+        [https://docs.swift.org/swift-book/LanguageGuide/MemorySafety.html](https://docs.swift.org/swift-book/LanguageGuide/MemorySafety.html)
+        
+    2. 이유 : perform two write accesses to the same location in memory at the same time.
+        
+        ```swift
+        func balance(_ x: inout Int, _ y: inout Int) {
+            let sum = x + y
+            x = sum / 2
+            y = sum - x
+        }
+        var playerOneScore = 42
+        var playerTwoScore = 30
+        balance(&playerOneScore, &playerTwoScore)  // OK
+        balance(&playerOneScore, &playerOneScore)
+        // Error: conflicting accesses to playerOneScore
+        ```
+        
+
+1. 충돌 안 일어나는 코드
+
+```swift
+// Make an explicit copy.
+var copyOfStepSize = stepSize
+increment(&copyOfStepSize)
+
+// Update the original.
+stepSize = copyOfStepSize
+// stepSize is now 2
+```
+
+## Conflicting Access to self in Methods
+
+1. 충돌 안나는 코드
+    1. 
+    
+    ```swift
+    struct Player {
+        var name: String
+        var health: Int
+        var energy: Int
+    
+        static let maxHealth = 10
+        mutating func restoreHealth() {
+            health = Player.maxHealth
+        }
+    }
+    
+    extension Player {
+        mutating func shareHealth(with teammate: inout Player) {
+            balance(&teammate.health, &health)
+        }
+    }
+    
+    var oscar = Player(name: "Oscar", health: 10, energy: 10)
+    var maria = Player(name: "Maria", health: 5, energy: 10)
+    oscar.shareHealth(with: &maria)  // OK
+    ```
+    
+    ![Untitled](Memory%20Safety%20906c854b389c4343875859d36d5915f1/Untitled%201.png)
+    
+2. 충돌 일어나는 코드
+    
+    ```swift
+    oscar.shareHealth(with: &oscar)
+    // Error: conflicting accesses to oscar
+    ```
+    
+    ![Untitled](Memory%20Safety%20906c854b389c4343875859d36d5915f1/Untitled%202.png)
+    
+
+## Conflicting Access to Properties
+
+1. 충돌이 일어나는 경우
+    
+     a. 이유 : 두 번의 write접근이 일어나기 때문(`playerInformation`)
+    
+    ```swift
+    func balance(_ x: inout Int, _ y: inout Int) {
+        let sum = x + y
+        x = sum / 2
+        y = sum - x
+    }
+    
+    var playerInformation = (health: 10, energy: 20)
+    balance(&playerInformation.health, &playerInformation.energy)
+    // Error: conflicting access to properties of playerInformation
+    ```
+    
+2. 충돌 안 일어나는 경우
+    
+    ```swift
+    func someFunction() {
+        var oscar = Player(name: "Oscar", health: 10, energy: 10)
+        balance(&oscar.health, &oscar.energy)  // OK
+    }
+    ```
+    
+
+## overlapping 엑세스가 safe하다는 것을 증명할 수 있는 경우
+
+1. 오직 인스턴스의 저장 프로퍼티에 접근할 때
+2. 지역변수 일 때
+3. 클로저에 의해 캡쳐되지 않거나 nonescaping클로저 일 때 
+
+> it can prove that overlapping access to properties of a structure is safe if the following conditions apply:
+> 
+> - You’re accessing only stored properties of an instance, not computed properties or class properties.
+> - The structure is the value of a local variable, not a global variable.
+> - The structure is either not captured by any closures, or it’s captured only by nonescaping closures.
+
+⇒ 컴파일러가 위의 상황을 증명하지 못 하면 access를 허용하지 않는다. 
+
+[[Swift 문법] Swift 공식 문서 정리 - 25 - Memory Safety](https://icksw.tistory.com/81)
+
+- 동시에 접근하는게 가능하지만 스위프트에서 이를 막아둔게 아닌가 싶다.
+
+```swift
+struct Player {
+    var name: String
+    var health: Int
+    var energy: Int
+
+    static let maxHealth = 10
+    mutating func restoreHealth() {
+        health = Player.maxHealth
+    }
+}
+
+class Player2 {
+    var health: Int = 10
+    var energy: Int = 10
+}
+
+//func balance(_ x: inout Int, _ y: inout Int) {
+//    let sum = x + y
+//    x = sum / 2
+//    y = sum - x
+//}
+
+func balance(_ x: inout Int, _ y: inout Int) {
+    var sum = x + y
+    
+    x = sum / 2
+    y = sum - x
+}
+
+var playerInformation = (health: 10, energy: 20)
+
+//balance(&playerInformation.health, &playerInformation.energy)
+//var oscar = Player(name: "Oscar", health: 10, energy: 10)
+
+func someFunction(completionHandler: (inout Player) -> Void) {
+    //var oscar = Player(name: "Oscar", health: 10, energy: 10)
+    var oscar = Player2()
+    //.... 여기서 스레드 세이프를 보장할 수 없음.
+    balance(&oscar.health, &oscar.energy)
+    
+    // tread safe하다고 볼 수 있을 것 같다.
+    //전역변수만 아니면 될 것 같다.
+   // completionHandler(&oscar)
+}
+
+/*
+ @escaping이면 참조 클로저 -> 함수밖에서 클로저를 사용하기 때문에 Tread safe보장하지 않는다.
+ (전역변수에 error가 생기는 것 -> 비동기적으로 접근가능 과 비슷한 맥락???)
+ */
+
+var oscar2 = Player2()
+balance(&oscar2.health, &oscar2.energy)
+
+//var oscar1 = Player(name: "Oscar", health: 10, energy: 10)
+//balance(&oscar1.health, &oscar1.energy)
+
+someFunction { player in
+    balance(&player.health, &player.energy)
+}
+
+//someFunction()
+
+/*
+ C언어 (카더라)
+ - 객체 지향적이지 않음. 절차지향적인 언어
+ - struct, class라는 것들이 없을 것
+ - C언어의 컴파일러는 Swift의 컴파일러가 고민해야하는 부분이 없었을 것
+ C++
+ - struct, class라는게 있음
+ - 전역변수라는게 없었음(전부 다 main 이라는 함수에 들어있었기 때문)
+
+View Builder
+ - escaping closure 사용 해서 뷰 그릴 때 재사용
+
+ */
+```
